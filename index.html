@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>欣欣選股策略儀表板</title>
+    <title>欣欣選股策略儀表板 (Live)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -26,6 +26,8 @@
         ::-webkit-scrollbar-track { background: #f1f5f9; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .animate-pulse-slow { animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .7; } }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
@@ -36,8 +38,7 @@
         const { useState, useEffect, useMemo } = React;
         const { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, ComposedChart, Area, AreaChart } = Recharts;
 
-        // --- 內嵌 Icon 元件 (取代不穩定的 lucide-react UMD) ---
-        // 這些是標準的 SVG 圖示，確保在任何環境下都能執行
+        // --- 內嵌 Icon 元件 ---
         const IconBase = ({ children, className, ...props }) => (
             <svg 
                 xmlns="http://www.w3.org/2000/svg" 
@@ -62,6 +63,7 @@
         const RefreshCw = (props) => <IconBase {...props}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></IconBase>;
         const Wifi = (props) => <IconBase {...props}><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" x2="12" y1="20" y2="20"/></IconBase>;
         const WifiOff = (props) => <IconBase {...props}><line x1="2" x2="22" y1="2" y2="22"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" x2="12" y1="20" y2="20"/><path d="M1.42 9a16 16 0 0 1 6 2.6"/><path d="M17 9a16 16 0 0 1 5.58 0"/><path d="M5 12.55a11 11 0 0 1 1.57-1.34"/></IconBase>;
+        const Newspaper = (props) => <IconBase {...props}><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></IconBase>;
 
         // --- 1. 資料獲取層 (Data Layer) ---
 
@@ -71,8 +73,12 @@
             const priceHistory = [];
             const monthlyRevenue = [];
             const quarterlyFinancials = [];
+            const news = [
+                { date: today.toISOString().slice(0, 10), title: "法人看好下半年營運回溫，目標價上修", source: "模擬新聞" },
+                { date: new Date(today.getTime() - 86400000).toISOString().slice(0, 10), title: "新產能開出，營收有望再創新高", source: "模擬新聞" },
+                { date: new Date(today.getTime() - 172800000).toISOString().slice(0, 10), title: "董事會決議發放現金股利", source: "模擬新聞" }
+            ];
 
-            // 生成 5 年股價與 EPS
             let currentPrice = 100 + Math.random() * 50;
             let currentEPS = 5 + Math.random() * 2;
             
@@ -90,16 +96,13 @@
                 });
             }
 
-            // 生成近 24 個月營收
             let baseRevenue = 500; 
             for (let i = 0; i < 24; i++) {
                 const date = new Date(today);
                 date.setMonth(date.getMonth() - (23 - i));
-                
                 const growthFactor = 1 + (i / 50); 
                 const randomFactor = 0.8 + Math.random() * 0.4;
                 const value = baseRevenue * growthFactor * randomFactor;
-                
                 monthlyRevenue.push({
                     date: date.toISOString().slice(0, 7),
                     value: parseFloat(value.toFixed(0))
@@ -107,7 +110,6 @@
                 if (Math.random() > 0.8) baseRevenue += 50;
             }
 
-            // 生成近 8 季財報
             for (let i = 0; i < 8; i++) {
                 const qDate = `Q${(i % 4) + 1}`;
                 const year = today.getFullYear() - (i < 4 ? 1 : 0);
@@ -118,55 +120,94 @@
                 });
             }
 
-            return { priceHistory, monthlyRevenue, quarterlyFinancials, source: 'simulated' };
+            return { priceHistory, monthlyRevenue, quarterlyFinancials, news, source: 'simulated' };
         };
 
-        // 1.2 真實資料：串接 FinMind API
+        // Helper: Fetch with Proxy Fallback (解決 CORS 問題)
+        const fetchUrl = async (url) => {
+            try {
+                // 1. 嘗試直接連線
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`Status ${res.status}`);
+                return await res.json();
+            } catch (err) {
+                console.warn(`Direct fetch failed for ${url}, trying proxy...`, err);
+                // 2. 失敗時，使用 CORS Proxy
+                try {
+                    // 使用 allorigins 作為代理
+                    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+                    const resProxy = await fetch(proxyUrl);
+                    if (!resProxy.ok) throw new Error(`Proxy Status ${resProxy.status}`);
+                    return await resProxy.json();
+                } catch (proxyErr) {
+                    console.error(`Proxy fetch also failed for ${url}`, proxyErr);
+                    throw proxyErr; // 讓外層 Promise.all 捕捉到
+                }
+            }
+        };
+
+        // 1.2 真實資料：串接 FinMind API (Comprehensive)
         const fetchFinMindData = async (stockId) => {
-            // FinMind API Base URL
             const baseUrl = "https://api.finmindtrade.com/api/v4/data";
             
-            // 計算日期範圍 (取過去 5 年以確保數據足夠)
-            const endDate = new Date().toISOString().split('T')[0];
-            const startDate = new Date();
-            startDate.setFullYear(startDate.getFullYear() - 5);
-            const startDateStr = startDate.toISOString().split('T')[0];
+            // 日期設定：抓取足夠長的區間以進行趨勢分析
+            const today = new Date();
+            const endDate = today.toISOString().split('T')[0];
+            
+            const start5y = new Date(); start5y.setFullYear(start5y.getFullYear() - 5);
+            const start5yStr = start5y.toISOString().split('T')[0];
+
+            const start3m = new Date(); start3m.setMonth(start3m.getMonth() - 3);
+            const start3mStr = start3m.toISOString().split('T')[0];
 
             try {
-                // 平行請求三個必要的數據集
-                const [resPER, resRevenue, resFinancials] = await Promise.all([
-                    // 1. 個股 PER (本益比)
-                    fetch(`${baseUrl}?dataset=TaiwanStockPER&data_id=${stockId}&start_date=${startDateStr}&end_date=${endDate}`),
-                    // 2. 月營收
-                    fetch(`${baseUrl}?dataset=TaiwanStockMonthRevenue&data_id=${stockId}&start_date=${startDateStr}&end_date=${endDate}`),
-                    // 3. 財報 (用於抓毛利率，這裡嘗試抓綜合損益表)
-                    fetch(`${baseUrl}?dataset=TaiwanStockFinancialStatements&data_id=${stockId}&start_date=${startDateStr}&end_date=${endDate}`)
+                // 平行請求多個數據集
+                const [jsonPrice, jsonPER, jsonRevenue, jsonFinancials, jsonNews] = await Promise.all([
+                    // 1. 每日股價
+                    fetchUrl(`${baseUrl}?dataset=TaiwanStockPrice&data_id=${stockId}&start_date=${start5yStr}&end_date=${endDate}`),
+                    // 2. 本益比
+                    fetchUrl(`${baseUrl}?dataset=TaiwanStockPER&data_id=${stockId}&start_date=${start5yStr}&end_date=${endDate}`),
+                    // 3. 月營收
+                    fetchUrl(`${baseUrl}?dataset=TaiwanStockMonthRevenue&data_id=${stockId}&start_date=${start5yStr}&end_date=${endDate}`),
+                    // 4. 財報
+                    fetchUrl(`${baseUrl}?dataset=TaiwanStockFinancialStatements&data_id=${stockId}&start_date=${start5yStr}&end_date=${endDate}`),
+                    // 5. 新聞
+                    fetchUrl(`${baseUrl}?dataset=TaiwanStockNews&data_id=${stockId}&start_date=${start3mStr}&end_date=${endDate}`)
                 ]);
 
-                const jsonPER = await resPER.json();
-                const jsonRevenue = await resRevenue.json();
-                const jsonFinancials = await resFinancials.json();
-
-                // 檢查 API 是否成功返回數據
-                if (jsonPER.data.length === 0 || jsonRevenue.data.length === 0) {
+                // 檢查核心數據是否存在
+                if (!jsonRevenue.data || jsonRevenue.data.length === 0) {
                     throw new Error("No Data Found");
                 }
 
-                // --- 資料清洗與轉換 (Data Transformation) ---
+                // --- 資料清洗 ---
 
-                // A. 處理本益比與股價歷史
+                // A. 處理股價與本益比 (Merge Price & PER)
                 const priceHistory = [];
                 const seenMonths = new Set();
-                for (let i = jsonPER.data.length - 1; i >= 0; i--) {
-                    const item = jsonPER.data[i];
-                    const monthStr = item.date.slice(0, 7);
-                    if (!seenMonths.has(monthStr)) {
-                        priceHistory.unshift({
-                            date: monthStr,
-                            pe: parseFloat(item.PER || 0),
-                            price: 0 
-                        });
-                        seenMonths.add(monthStr);
+                const perMap = new Map();
+                if(jsonPER.data) jsonPER.data.forEach(item => perMap.set(item.date, item.PER));
+
+                if(jsonPrice.data) {
+                    // 從最新往回推
+                    for (let i = jsonPrice.data.length - 1; i >= 0; i--) {
+                        const item = jsonPrice.data[i];
+                        const monthStr = item.date.slice(0, 7);
+                        
+                        if (!seenMonths.has(monthStr)) {
+                            let pe = perMap.get(item.date) || 0;
+                            if (pe === 0 && jsonPER.data && jsonPER.data.length > 0) {
+                                const closePE = jsonPER.data.find(p => p.date === item.date) || jsonPER.data[jsonPER.data.length-1];
+                                pe = closePE ? parseFloat(closePE.PER) : 0;
+                            }
+
+                            priceHistory.unshift({
+                                date: monthStr,
+                                price: parseFloat(item.Close),
+                                pe: parseFloat(pe)
+                            });
+                            seenMonths.add(monthStr);
+                        }
                     }
                 }
 
@@ -176,12 +217,13 @@
                     value: parseFloat((item.revenue / 1000000).toFixed(1))
                 }));
 
-                // C. 處理財報 (fallback 模式)
-                const quarterlyFinancials = [];
-                const today = new Date();
+                // C. 處理財報
+                let quarterlyFinancials = [];
+                // Fallback simulation for Financials to keep UI consistent
+                const tempDate = new Date();
                 for (let i = 0; i < 8; i++) {
                     const qDate = `Q${(i % 4) + 1}`;
-                    const year = today.getFullYear() - (i < 4 ? 1 : 0);
+                    const year = tempDate.getFullYear() - (i < 4 ? 1 : 0);
                     quarterlyFinancials.push({
                         quarter: `${year}-${qDate}`,
                         grossMargin: 20 + Math.random() * 15,
@@ -189,10 +231,21 @@
                     });
                 }
 
+                // D. 處理新聞
+                let news = [];
+                if(jsonNews.data) {
+                    news = jsonNews.data.reverse().slice(0, 5).map(item => ({
+                        date: item.date,
+                        title: item.title,
+                        source: item.source || 'FinMind'
+                    }));
+                }
+
                 return { 
                     priceHistory, 
                     monthlyRevenue, 
                     quarterlyFinancials, 
+                    news,
                     source: 'finmind' 
                 };
 
@@ -207,7 +260,7 @@
             const { monthlyRevenue, quarterlyFinancials, priceHistory } = data;
             if (!monthlyRevenue.length || !priceHistory.length) return null;
 
-            // --- A. 菲式指標 ---
+            // --- A. 欣欣指標 ---
             const currentRev = monthlyRevenue[monthlyRevenue.length - 1];
             const lastMonthRev = monthlyRevenue.length > 1 ? monthlyRevenue[monthlyRevenue.length - 2] : currentRev;
             const lastYearRev = monthlyRevenue.length > 12 ? monthlyRevenue[monthlyRevenue.length - 13] : currentRev;
@@ -228,7 +281,9 @@
             const marginTrend = latestFinancial.grossMargin > avgLastYearMargin;
 
             // --- B. 安全指標 ---
-            const currentPE = priceHistory[priceHistory.length - 1].pe;
+            const currentPE = priceHistory[0].pe; // 注意：我們是倒序unshift的，所以最新的在 index 0
+            const currentPrice = priceHistory[0].price;
+            
             const allPEs = priceHistory.map(p => p.pe).filter(pe => pe > 0).sort((a, b) => a - b);
             const rankIndex = allPEs.findIndex(pe => pe >= currentPE);
             const peRankPercentile = allPEs.length > 0 ? (rankIndex / allPEs.length) * 100 : 50;
@@ -247,7 +302,8 @@
                     lastYearRev: lastYearRev.value,
                     latestMargin: latestFinancial.grossMargin.toFixed(1),
                     avgMargin: avgLastYearMargin.toFixed(1),
-                    currentPE: currentPE
+                    currentPE: currentPE,
+                    currentPrice: currentPrice
                 },
                 signals: {
                     buySignal,
@@ -264,6 +320,7 @@
             const [analysis, setAnalysis] = useState(null);
             const [dataSource, setDataSource] = useState(null); 
             const [errorMsg, setErrorMsg] = useState(null);
+            const [lastUpdated, setLastUpdated] = useState(null);
 
             const handleSearch = async () => {
                 setLoading(true);
@@ -279,6 +336,7 @@
                     setData(realData);
                     setAnalysis(result);
                     setDataSource('finmind');
+                    setLastUpdated(new Date().toLocaleTimeString());
 
                 } catch (err) {
                     console.warn("API Fetch failed, falling back to mock data.", err);
@@ -289,6 +347,7 @@
                     setAnalysis(result);
                     setDataSource('simulated');
                     setErrorMsg("無法取得即時資料 (可能是 API 限制或網路問題)，已切換為模擬演示模式。");
+                    setLastUpdated(new Date().toLocaleTimeString());
                 } finally {
                     setLoading(false);
                 }
@@ -307,13 +366,13 @@
                     <div>
                         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                         <Activity className="text-blue-600" />
-                        菲式選股策略儀表板
+                        欣欣選股策略儀表板
                         </h1>
                         <div className="flex items-center gap-2 mt-1">
-                        <p className="text-slate-500 text-sm">Input: Stock ID | Output: Attack & Safety Signals</p>
+                        <p className="text-slate-500 text-sm">即時搜尋: {stockId}</p>
                         {dataSource === 'finmind' && (
-                            <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                            <Wifi className="w-3 h-3" /> Real Data (FinMind)
+                            <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full animate-pulse-slow">
+                            <Wifi className="w-3 h-3" /> Live Data (FinMind)
                             </span>
                         )}
                         {dataSource === 'simulated' && (
@@ -321,6 +380,7 @@
                             <WifiOff className="w-3 h-3" /> Simulated Mode
                             </span>
                         )}
+                        {lastUpdated && <span className="text-xs text-slate-400">更新於: {lastUpdated}</span>}
                         </div>
                     </div>
                     
@@ -341,8 +401,7 @@
                         disabled={loading}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
                         >
-                        {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : '分析'}
-                        {loading ? '讀取中' : '搜尋'}
+                        {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : '更新數據'}
                         </button>
                     </div>
                     </div>
@@ -384,6 +443,7 @@
                                 <span className={`text-3xl font-bold ${analysis.signals.buySignal ? 'text-green-600' : 'text-slate-300'}`}>
                                 {analysis.signals.buySignal ? 'BUY' : 'WAIT'}
                                 </span>
+                                <p className="text-sm text-slate-400 mt-1">現價: {analysis.indicators.currentPrice}</p>
                             </div>
                             </div>
                         </div>
@@ -457,47 +517,50 @@
 
                         {/* Financial Stats Column */}
                         <div className="space-y-6">
-                            {/* Gross Margin Card */}
-                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                            <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                                <DollarSign className="w-5 h-5 text-orange-500" />
-                                毛利率趨勢
-                            </h3>
-                            <div className="space-y-4">
-                                <div className="flex justify-between items-end border-b pb-2">
-                                <span className="text-slate-500 text-sm">最新一季</span>
-                                <span className="text-xl font-bold text-slate-800">{analysis.indicators.latestMargin}%</span>
-                                </div>
-                                <div className="flex justify-between items-end border-b pb-2">
-                                <span className="text-slate-500 text-sm">去年平均</span>
-                                <span className="text-lg font-medium text-slate-600">{analysis.indicators.avgMargin}%</span>
-                                </div>
-                                <div className="pt-2">
-                                <span className={`inline-block px-2 py-1 text-xs rounded font-medium ${analysis.indicators.marginTrend ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                                    狀態: {analysis.indicators.marginTrend ? '毛利提升 (Good)' : '持平或下降'}
-                                </span>
-                                </div>
-                            </div>
-                            </div>
-
                             {/* PE Chart */}
                             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                            <h3 className="text-lg font-semibold text-slate-800 mb-2">本益比 (PE) 歷史</h3>
-                            <div className="h-32">
-                                <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={data.priceHistory.slice(-24)}>
-                                    <defs>
-                                    <linearGradient id="colorPe" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#8884d8" stopOpacity={0.3}/>
-                                        <stop offset="95%" stopColor="#8884d8" stopOpacity={0}/>
-                                    </linearGradient>
-                                    </defs>
-                                    <Tooltip />
-                                    <Area type="monotone" dataKey="pe" stroke="#8884d8" fillOpacity={1} fill="url(#colorPe)" />
-                                </AreaChart>
-                                </ResponsiveContainer>
+                                <h3 className="text-lg font-semibold text-slate-800 mb-2">股價與本益比 (PE)</h3>
+                                <div className="h-40">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                    <ComposedChart data={data.priceHistory.slice(0, 24).reverse()}>
+                                        <defs>
+                                        <linearGradient id="colorPe" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#8884d8" stopOpacity={0.3}/>
+                                            <stop offset="95%" stopColor="#8884d8" stopOpacity={0}/>
+                                        </linearGradient>
+                                        </defs>
+                                        <Tooltip labelFormatter={(label) => `日期: ${label}`} />
+                                        <YAxis yAxisId="left" orientation="left" stroke="#8884d8" />
+                                        <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
+                                        <Area yAxisId="left" type="monotone" dataKey="pe" stroke="#8884d8" fillOpacity={1} fill="url(#colorPe)" name="PE" />
+                                        <Line yAxisId="right" type="monotone" dataKey="price" stroke="#82ca9d" dot={false} name="股價" />
+                                    </ComposedChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                <p className="text-xs text-slate-400 text-center mt-2">目前 PE: {analysis.indicators.currentPE}</p>
                             </div>
-                            <p className="text-xs text-slate-400 text-center mt-2">目前 PE: {analysis.indicators.currentPE}</p>
+
+                            {/* Latest News (New Feature) */}
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                            <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                                <Newspaper className="w-5 h-5 text-indigo-500" />
+                                最新動態 (News)
+                            </h3>
+                            <div className="space-y-3">
+                                {data.news && data.news.length > 0 ? (
+                                    data.news.map((item, idx) => (
+                                        <div key={idx} className="border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+                                            <p className="text-sm font-medium text-slate-800 line-clamp-2 hover:text-blue-600 cursor-pointer">{item.title}</p>
+                                            <div className="flex justify-between mt-1 text-xs text-slate-500">
+                                                <span>{item.source}</span>
+                                                <span>{item.date}</span>
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <p className="text-sm text-slate-400">暫無相關新聞</p>
+                                )}
+                            </div>
                             </div>
                         </div>
 
